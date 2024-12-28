@@ -11,12 +11,15 @@ from sklearn.metrics import pairwise_distances
 from matplotlib import cm
 
 
-def align_spots(adata_st_list_input, # list of spatial transcriptomics datasets
-                method="icp", # "icp" or "paste"
-                data_type="Visium", # a spot has six nearest neighborhoods if "Visium", four nearest neighborhoods otherwise
-                coor_key="spatial", # "spatial" for visium; key for the spatial coordinates used for alignment
-                tol=0.01, # parameter for "icp" method; tolerance level
-                test_all_angles=False, # parameter for "icp" method; whether to test multiple rotation angles or not
+def align_spots(adata_st_list_input,  # list of spatial transcriptomics datasets
+                method="icp",  # "icp" or "paste"
+                # a spot has six nearest neighborhoods if "Visium", four nearest neighborhoods otherwise
+                data_type="Visium",
+                # "spatial" for visium; key for the spatial coordinates used for alignment
+                coor_key="spatial",
+                tol=0.01,  # parameter for "icp" method; tolerance level
+                # parameter for "icp" method; whether to test multiple rotation angles or not
+                test_all_angles=False,
                 plot=False,
                 paste_alpha=0.1,
                 paste_dissimilarity="kl"
@@ -29,23 +32,23 @@ def align_spots(adata_st_list_input, # list of spatial transcriptomics datasets
     if plot:
         # Choose colors
         cmap = cm.get_cmap('rainbow', len(adata_st_list))
-        colors_list = [matplotlib.colors.rgb2hex(cmap(i)) for i in range(len(adata_st_list))]
+        colors_list = [matplotlib.colors.rgb2hex(
+            cmap(i)) for i in range(len(adata_st_list))]
 
         # Plot spots before alignment
         plt.figure(figsize=(5, 5))
         plt.title("Before alignment")
         for i in range(len(adata_st_list)):
-            plt.scatter(adata_st_list[i].obsm[coor_key][:, 0], 
-                adata_st_list[i].obsm[coor_key][:, 1], 
-                c=colors_list[i],
-                label="Slice %d spots" % i, s=5., alpha=0.5)
+            plt.scatter(adata_st_list[i].obsm[coor_key][:, 0],
+                        adata_st_list[i].obsm[coor_key][:, 1],
+                        c=colors_list[i],
+                        label="Slice %d spots" % i, s=5., alpha=0.5)
         ax = plt.gca()
         ax.set_ylim(ax.get_ylim()[::-1])
         plt.xticks([])
         plt.yticks([])
         plt.legend(loc=(1.02, .2), ncol=(len(adata_st_list)//13 + 1))
         plt.show()
-
 
     if (method == "icp") or (method == "ICP"):
         print("Using the Iterative Closest Point algorithm for alignemnt.")
@@ -62,7 +65,8 @@ def align_spots(adata_st_list_input, # list of spatial transcriptomics datasets
                 loc_y = adata.obs.loc[:, ["array_col"]]
                 loc_y = np.array(loc_y)
                 loc = np.concatenate((loc_x, loc_y), axis=1)
-                pairwise_loc_distsq = np.sum((loc.reshape([1,-1,2]) - loc.reshape([-1,1,2])) ** 2, axis=2)
+                pairwise_loc_distsq = np.sum(
+                    (loc.reshape([1, -1, 2]) - loc.reshape([-1, 1, 2])) ** 2, axis=2)
                 n_neighbors = np.sum(pairwise_loc_distsq < 5, axis=1) - 1
                 edge = ((n_neighbors > 1) & (n_neighbors < 5)).astype(np.float32)
             else:
@@ -71,9 +75,14 @@ def align_spots(adata_st_list_input, # list of spatial transcriptomics datasets
                 loc_y = adata.obs.loc[:, ["array_col"]]
                 loc_y = np.array(loc_y)
                 loc = np.concatenate((loc_x, loc_y), axis=1)
-                pairwise_loc_distsq = np.sum((loc.reshape([1,-1,2]) - loc.reshape([-1,1,2])) ** 2, axis=2)
-                min_distsq = np.sort(np.unique(pairwise_loc_distsq), axis=None)[1]
-                n_neighbors = np.sum(pairwise_loc_distsq < (min_distsq * 3), axis=1) - 1
+                pairwise_loc_distsq = np.sum(
+                    (loc.reshape([1, -1, 2]) - loc.reshape([-1, 1, 2])) ** 2, axis=2)
+                min_distsq = np.sort(
+                    np.unique(pairwise_loc_distsq),
+                    axis=None)[1]
+                n_neighbors = np.sum(
+                    pairwise_loc_distsq < (min_distsq * 3),
+                    axis=1) - 1
                 edge = ((n_neighbors > 1) & (n_neighbors < 7)).astype(np.float32)
             point_cloud_list.append(adata.obsm[coor_key][edge == 1].copy())
 
@@ -85,10 +94,14 @@ def align_spots(adata_st_list_input, # list of spatial transcriptomics datasets
         for i in range(len(adata_st_list) - 1):
             if test_all_angles == True:
                 for angle in [0., np.pi * 1 / 3, np.pi * 2 / 3, np.pi, np.pi * 4 / 3, np.pi * 5 / 3]:
-                    R = np.array([[np.cos(angle), np.sin(angle), 0], 
-                                  [-np.sin(angle), np.cos(angle), 0], 
+                    R = np.array([[np.cos(angle), np.sin(angle), 0],
+                                  [-np.sin(angle), np.cos(angle), 0],
                                   [0, 0, 1]]).T
-                    T, distances, _ = icp(transform(point_cloud_list[i+1], R), point_cloud_list[i], tolerance=tol)
+                    T, distances, _ = icp(
+                        transform(point_cloud_list[i + 1],
+                                  R),
+                        point_cloud_list[i],
+                        tolerance=tol)
                     if angle == 0:
                         loss_best = np.mean(distances)
                         angle_best = angle
@@ -102,7 +115,10 @@ def align_spots(adata_st_list_input, # list of spatial transcriptomics datasets
                             T_best = T
                 T = T_best @ R_best
             else:
-                T, _, _ = icp(point_cloud_list[i+1], point_cloud_list[i], tolerance=tol)
+                T, _, _ = icp(
+                    point_cloud_list[i + 1],
+                    point_cloud_list[i],
+                    tolerance=tol)
             trans_list.append(T)
         # Tranform
         for i in range(len(adata_st_list) - 1):
@@ -118,29 +134,33 @@ def align_spots(adata_st_list_input, # list of spatial transcriptomics datasets
         pis = []
         # Calculate pairwise transformation matrices
         for i in range(len(adata_st_list) - 1):
-            pi = pairwise_align_paste(adata_st_list[i], adata_st_list[i+1], coor_key=coor_key,
-                                      alpha = paste_alpha, dissimilarity = paste_dissimilarity)
+            pi = pairwise_align_paste(
+                adata_st_list[i],
+                adata_st_list[i + 1],
+                coor_key=coor_key, alpha=paste_alpha,
+                dissimilarity=paste_dissimilarity)
             pis.append(pi)
         # Tranform
-        S1, S2  = generalized_procrustes_analysis(adata_st_list[0].obsm[coor_key], 
-                                                  adata_st_list[1].obsm[coor_key], 
-                                                  pis[0])
+        S1, S2 = generalized_procrustes_analysis(adata_st_list[0].obsm[coor_key],
+                                                 adata_st_list[1].obsm[coor_key],
+                                                 pis[0])
         adata_st_list[0].obsm["spatial_aligned"] = S1
         adata_st_list[1].obsm["spatial_aligned"] = S2
         for i in range(1, len(adata_st_list) - 1):
-            S1, S2 = generalized_procrustes_analysis(adata_st_list[i].obsm["spatial_aligned"], 
-                                                     adata_st_list[i+1].obsm[coor_key], 
-                                                     pis[i])
+            S1, S2 = generalized_procrustes_analysis(
+                adata_st_list[i].obsm["spatial_aligned"],
+                adata_st_list[i + 1].obsm[coor_key],
+                pis[i])
             adata_st_list[i+1].obsm["spatial_aligned"] = S2
 
     if plot:
         plt.figure(figsize=(5, 5))
         plt.title("After alignment")
         for i in range(len(adata_st_list)):
-            plt.scatter(adata_st_list[i].obsm["spatial_aligned"][:, 0], 
-                adata_st_list[i].obsm["spatial_aligned"][:, 1], 
-                c=colors_list[i],
-                label="Slice %d spots" % i, s=5., alpha=0.5)
+            plt.scatter(adata_st_list[i].obsm["spatial_aligned"][:, 0],
+                        adata_st_list[i].obsm["spatial_aligned"][:, 1],
+                        c=colors_list[i],
+                        label="Slice %d spots" % i, s=5., alpha=0.5)
         ax = plt.gca()
         ax.set_ylim(ax.get_ylim()[::-1])
         plt.xticks([])
@@ -151,20 +171,33 @@ def align_spots(adata_st_list_input, # list of spatial transcriptomics datasets
     return adata_st_list
 
 
-def preprocess(adata_st_list_input, # list of spatial transcriptomics (ST) anndata objects
-               adata_ref_input, # reference single-cell anndata object
-               celltype_ref_col="celltype", # column of adata_ref_input.obs for cell type information
-               sample_col=None, # column of adata_ref_input.obs for batch labels
-               celltype_ref=None, # specify cell types to use for deconvolution
-               n_hvg_group=500, # number of highly variable genes for reference anndata
-               three_dim_coor=None, # if not None, use existing 3d coordinates in shape [# of total spots, 3]
-               coor_key="spatial_aligned", # "spatial_aligned" by default
-               rad_cutoff=None, # cutoff radius of spots for building graph
-               rad_coef=1.1, # if rad_cutoff=None, rad_cutoff is the minimum distance between spots multiplies rad_coef
-               slice_dist_micron=None, # pairwise distances in micrometer for reconstructing z-axis 
-               prune_graph_cos=False, # prune graph connections according to cosine similarity
-               cos_threshold=0.5, # threshold for pruning graph connections
-               c2c_dist=100, # center to center distance between nearest spots in micrometer
+def preprocess(adata_st_list_input,
+               # list of spatial transcriptomics (ST) anndata objects
+               adata_ref_input,
+               # reference single-cell anndata object
+               celltype_ref_col="celltype",
+               # column of adata_ref_input.obs for cell type information
+               sample_col=None,
+               # column of adata_ref_input.obs for batch labels
+               celltype_ref=None,
+               # specify cell types to use for deconvolution
+               n_hvg_group=500,
+               # number of highly variable genes for reference anndata
+               three_dim_coor=None,
+               # if not None, use existing 3d coordinates in shape [# of total spots, 3]
+               coor_key="spatial_aligned",
+               # "spatial_aligned" by default
+               rad_cutoff=None,
+               # cutoff radius of spots for building graph
+               rad_coef=1.1,
+               # if rad_cutoff=None, rad_cutoff is the minimum distance between spots multiplies rad_coef
+               slice_dist_micron=None,
+               # pairwise distances in micrometer for reconstructing z-axis
+               prune_graph_cos=False,
+               # prune graph connections according to cosine similarity
+               cos_threshold=0.5,  # threshold for pruning graph connections
+               c2c_dist=100,
+               # center to center distance between nearest spots in micrometer
                ):
 
     adata_st_list = adata_st_list_input.copy()
@@ -180,11 +213,19 @@ def preprocess(adata_st_list_input, # list of spatial transcriptomics (ST) annda
         if not isinstance(celltype_ref, list):
             raise ValueError("'celltype_ref' must be a list!")
         else:
-            adata_ref = adata_ref[[(t in celltype_ref) for t in adata_ref.obs[celltype_ref_col].values.astype(str)], :]
+            adata_ref = adata_ref[[(t in celltype_ref)
+                                   for t in
+                                   adata_ref.obs[celltype_ref_col].values.astype(
+                str)],
+                :]
     else:
         celltype_counts = adata_ref.obs[celltype_ref_col].value_counts()
         celltype_ref = list(celltype_counts.index[celltype_counts > 1])
-        adata_ref = adata_ref[[(t in celltype_ref) for t in adata_ref.obs[celltype_ref_col].values.astype(str)], :]
+        adata_ref = adata_ref[
+            [(t in celltype_ref)
+             for t in adata_ref.obs[celltype_ref_col].values.astype(str)],
+            :
+        ]
 
     # Remove cells and genes with 0 counts
     sc.pp.filter_cells(adata_ref, min_genes=1)
@@ -195,15 +236,19 @@ def preprocess(adata_st_list_input, # list of spatial transcriptomics (ST) annda
         adata_st_new = adata_st_list[i].copy()
         adata_st_new.var_names_make_unique()
         # Remove mt-genes
-        adata_st_new = adata_st_new[:, (np.array(~adata_st_new.var.index.str.startswith("mt-")) 
-                                    & np.array(~adata_st_new.var.index.str.startswith("MT-")))]
+        adata_st_new = \
+            adata_st_new[
+                :,
+                (np.array(~adata_st_new.var.index.str.startswith("mt-"))
+                 & np.array(~adata_st_new.var.index.str.startswith("MT-")))]
         adata_st_new.obs.index = adata_st_new.obs.index + "-slice%d" % i
         adata_st_new.obs['slice'] = i
         if i == 0:
             adata_st = adata_st_new
         else:
             genes_shared = adata_st.var.index & adata_st_new.var.index
-            adata_st = adata_st[:, genes_shared].concatenate(adata_st_new[:, genes_shared], index_unique=None)
+            adata_st = adata_st[:, genes_shared].concatenate(
+                adata_st_new[:, genes_shared], index_unique=None)
 
     adata_st.obs["slice"] = adata_st.obs["slice"].values.astype(int)
 
@@ -215,7 +260,9 @@ def preprocess(adata_st_list_input, # list of spatial transcriptomics (ST) annda
     # Select hvgs
     adata_ref_log = adata_ref.copy()
     sc.pp.log1p(adata_ref_log)
-    hvgs = select_hvgs(adata_ref_log, celltype_ref_col=celltype_ref_col, num_per_group=n_hvg_group)
+    hvgs = select_hvgs(
+        adata_ref_log, celltype_ref_col=celltype_ref_col,
+        num_per_group=n_hvg_group)
 
     print("%d highly variable genes selected." % len(hvgs))
     adata_ref = adata_ref[:, hvgs]
@@ -223,18 +270,23 @@ def preprocess(adata_st_list_input, # list of spatial transcriptomics (ST) annda
     print("Calculate basis for deconvolution...")
     sc.pp.filter_cells(adata_ref, min_genes=1)
     sc.pp.normalize_total(adata_ref, target_sum=1)
-    celltype_list = list(sorted(set(adata_ref.obs[celltype_ref_col].values.astype(str))))
+    celltype_list = list(
+        sorted(set(adata_ref.obs[celltype_ref_col].values.astype(str))))
 
     basis = np.zeros((len(celltype_list), len(adata_ref.var.index)))
     if sample_col is not None:
-        sample_list = list(sorted(set(adata_ref.obs[sample_col].values.astype(str))))
+        sample_list = list(
+            sorted(set(adata_ref.obs[sample_col].values.astype(str))))
         for i in range(len(celltype_list)):
             c = celltype_list[i]
             tmp_list = []
             for j in range(len(sample_list)):
                 s = sample_list[j]
-                tmp = adata_ref[(adata_ref.obs[celltype_ref_col].values.astype(str) == c) & 
-                                (adata_ref.obs[sample_col].values.astype(str) == s), :].X
+                tmp = adata_ref[
+                    (adata_ref.obs[celltype_ref_col].values.astype(str) == c) &
+                    (adata_ref.obs[sample_col].values.astype(str) == s),
+                    :
+                ].X
                 if scipy.sparse.issparse(tmp):
                     tmp = tmp.toarray()
                 if tmp.shape[0] >= 3:
@@ -242,12 +294,16 @@ def preprocess(adata_st_list_input, # list of spatial transcriptomics (ST) annda
             tmp_mean = np.mean(tmp_list, axis=0)
             if scipy.sparse.issparse(tmp_mean):
                 tmp_mean = tmp_mean.toarray()
-            print("%d batches are used for computing the basis vector of cell type <%s>." % (len(tmp_list), c))
+            print(
+                "%d batches are used for computing"
+                "the basis vector of cell type <%s>."
+                % (len(tmp_list), c))
             basis[i, :] = tmp_mean
     else:
         for i in range(len(celltype_list)):
             c = celltype_list[i]
-            tmp = adata_ref[adata_ref.obs[celltype_ref_col].values.astype(str) == c, :].X
+            tmp = adata_ref[
+                adata_ref.obs[celltype_ref_col].values.astype(str) == c, :].X
             if scipy.sparse.issparse(tmp):
                 tmp = tmp.toarray()
             basis[i, :] = np.mean(tmp, axis=0).reshape((-1))
@@ -280,7 +336,7 @@ def preprocess(adata_st_list_input, # list of spatial transcriptomics (ST) annda
     # Build a graph for spots across multiple slices
     print("Start building a graph...")
 
-    # Build 3D coordinates 
+    # Build 3D coordinates
     if three_dim_coor is None:
 
         # The first adata in adata_list is used as a reference for computing cutoff radius of spots
@@ -301,31 +357,36 @@ def preprocess(adata_st_list_input, # list of spatial transcriptomics (ST) annda
             loc = np.concatenate([loc_xy, loc_z.reshape(-1, 1)], axis=1)
         else:
             if len(slice_dist_micron) != (len(adata_st_list) - 1):
-                raise ValueError("The length of 'slice_dist_micron' should be the number of adatas - 1 !")
+                raise ValueError(
+                    "The length of 'slice_dist_micron' should be the number of adatas - 1 !")
             else:
                 loc_xy = pd.DataFrame(adata_st.obsm['spatial_aligned']).values
                 loc_z = np.zeros(adata_st.shape[0])
                 dim = 0
                 for i in range(len(slice_dist_micron)):
                     dim += adata_st_list[i].shape[0]
-                    loc_z[dim:] += slice_dist_micron[i] * (min_dist_ref / c2c_dist)
+                    loc_z[dim:] += slice_dist_micron[i] * \
+                        (min_dist_ref / c2c_dist)
                 loc = np.concatenate([loc_xy, loc_z.reshape(-1, 1)], axis=1)
 
     # If 3D coordinates already exists
     else:
         if rad_cutoff is None:
-            raise ValueError("Please specify 'rad_cutoff' for finding 3D neighbors!")
+            raise ValueError(
+                "Please specify 'rad_cutoff' for finding 3D neighbors!")
         loc = three_dim_coor
 
     pair_dist = pairwise_distances(loc)
     G = (pair_dist < rad_cutoff).astype(float)
 
     if prune_graph_cos:
-        pair_dist_cos = pairwise_distances(adata_st.X, metric="cosine") # 1 - cosine_similarity
+        pair_dist_cos = pairwise_distances(
+            adata_st.X, metric="cosine")  # 1 - cosine_similarity
         G_cos = (pair_dist_cos < (1 - cos_threshold)).astype(float)
         G = G * G_cos
 
-    print('%.4f neighbors per cell on average.' % (np.mean(np.sum(G, axis=1)) - 1))
+    print('%.4f neighbors per cell on average.' %
+          (np.mean(np.sum(G, axis=1)) - 1))
     adata_st.obsm["graph"] = G
     adata_st.obsm["3D_coor"] = loc
 
@@ -333,19 +394,23 @@ def preprocess(adata_st_list_input, # list of spatial transcriptomics (ST) annda
 
 
 def select_hvgs(adata_ref, celltype_ref_col, num_per_group=200):
-    sc.tl.rank_genes_groups(adata_ref, groupby=celltype_ref_col, method="t-test", key_added="ttest", use_raw=False)
-    markers_df = pd.DataFrame(adata_ref.uns['ttest']['names']).iloc[0:num_per_group, :]
+    sc.tl.rank_genes_groups(
+        adata_ref, groupby=celltype_ref_col, method="t-test", key_added="ttest",
+        use_raw=False)
+    markers_df = pd.DataFrame(
+        adata_ref.uns['ttest']['names']).iloc[0:num_per_group, :]
     genes = sorted(list(np.unique(markers_df.melt().value.values)))
     return genes
 
 
-def calculate_impubasis(adata_st_input, #st anndata object (should be one of the output from STitch3D.utils.preprocess)
-                        adata_ref_input, # reference single-cell anndata object (raw data)
-                        celltype_ref_col="celltype", # column of adata_ref_input.obs for cell type information
-                        sample_col=None, # column of adata_ref_input.obs for batch labels
-                        celltype_ref=None, # specify cell types to use for deconvolution
+def calculate_impubasis(adata_st_input,  # st anndata object (should be one of the output from STitch3D.utils.preprocess)
+                        # reference single-cell anndata object (raw data)
+                        adata_ref_input,
+                        celltype_ref_col="celltype",  # column of adata_ref_input.obs for cell type information
+                        sample_col=None,  # column of adata_ref_input.obs for batch labels
+                        celltype_ref=None,  # specify cell types to use for deconvolution
                         ):
-    
+
     adata_ref = adata_ref_input.copy()
     adata_ref.var_names_make_unique()
     # Remove mt-genes
@@ -356,11 +421,18 @@ def calculate_impubasis(adata_st_input, #st anndata object (should be one of the
         if not isinstance(celltype_ref, list):
             raise ValueError("'celltype_ref' must be a list!")
         else:
-            adata_ref = adata_ref[[(t in celltype_ref) for t in adata_ref.obs[celltype_ref_col].values.astype(str)], :]
+            adata_ref = adata_ref[[(t in celltype_ref)
+                                   for t in
+                                   adata_ref.obs[celltype_ref_col].values.astype(
+                str)],
+                :]
     else:
         celltype_counts = adata_ref.obs[celltype_ref_col].value_counts()
         celltype_ref = list(celltype_counts.index[celltype_counts > 1])
-        adata_ref = adata_ref[[(t in celltype_ref) for t in adata_ref.obs[celltype_ref_col].values.astype(str)], :]
+        adata_ref = adata_ref[[(t in celltype_ref)
+                               for t in adata_ref.obs[celltype_ref_col].values.astype(
+                                   str)],
+                              :]
 
     # Remove cells and genes with 0 counts
     sc.pp.filter_cells(adata_ref, min_genes=1)
@@ -373,24 +445,26 @@ def calculate_impubasis(adata_st_input, #st anndata object (should be one of the
     adata_ref = adata_ref[adata_ref_ls.obs.index, :]
     # ref_ls: library size (only account for hvgs) of single cells in ref
     if scipy.sparse.issparse(adata_ref_ls.X):
-        ref_ls = np.sum(adata_ref_ls.X.toarray(), axis=1).reshape((-1,1))
+        ref_ls = np.sum(adata_ref_ls.X.toarray(), axis=1).reshape((-1, 1))
         adata_ref.obsm["forimpu"] = adata_ref.X.toarray() / ref_ls
     else:
-        ref_ls = np.sum(adata_ref_ls.X, axis=1).reshape((-1,1))
+        ref_ls = np.sum(adata_ref_ls.X, axis=1).reshape((-1, 1))
         adata_ref.obsm["forimpu"] = adata_ref.X / ref_ls
 
     # Calculate basis for imputation
-    celltype_list = list(sorted(set(adata_ref.obs[celltype_ref_col].values.astype(str))))
+    celltype_list = list(
+        sorted(set(adata_ref.obs[celltype_ref_col].values.astype(str))))
     basis_impu = np.zeros((len(celltype_list), len(adata_ref.var.index)))
     if sample_col is not None:
-        sample_list = list(sorted(set(adata_ref.obs[sample_col].values.astype(str))))
+        sample_list = list(
+            sorted(set(adata_ref.obs[sample_col].values.astype(str))))
         for i in range(len(celltype_list)):
             c = celltype_list[i]
             tmp_list = []
             for j in range(len(sample_list)):
                 s = sample_list[j]
-                tmp = adata_ref[(adata_ref.obs[celltype_ref_col].values.astype(str) == c) & 
-                                (adata_ref.obs[sample_col].values.astype(str) == s), :].obsm["forimpu"]
+                tmp = adata_ref[(adata_ref.obs[celltype_ref_col].values.astype(str) == c) & (
+                    adata_ref.obs[sample_col].values.astype(str) == s), :].obsm["forimpu"]
                 if scipy.sparse.issparse(tmp):
                     tmp = tmp.toarray()
                 if tmp.shape[0] >= 3:
@@ -398,12 +472,14 @@ def calculate_impubasis(adata_st_input, #st anndata object (should be one of the
             tmp_mean = np.mean(tmp_list, axis=0)
             if scipy.sparse.issparse(tmp_mean):
                 tmp_mean = tmp_mean.toarray()
-            print("%d batches are used for computing the basis vector of cell type <%s>." % (len(tmp_list), c))
+            print("%d batches are used for computing the basis vector of cell type <%s>." % (
+                len(tmp_list), c))
             basis_impu[i, :] = tmp_mean
     else:
         for i in range(len(celltype_list)):
             c = celltype_list[i]
-            tmp = adata_ref[adata_ref.obs[celltype_ref_col].values.astype(str) == c, :].obsm["forimpu"]
+            tmp = adata_ref[adata_ref.obs[celltype_ref_col].values.astype(
+                str) == c, :].obsm["forimpu"]
             if scipy.sparse.issparse(tmp):
                 tmp = tmp.toarray()
             basis_impu[i, :] = np.mean(tmp, axis=0).reshape((-1))
@@ -417,5 +493,3 @@ def calculate_impubasis(adata_st_input, #st anndata object (should be one of the
     adata_basis_impu.var = df_gene
     adata_basis_impu = adata_basis_impu[~np.isnan(adata_basis_impu.X[:, 0])]
     return adata_basis_impu
-
-
