@@ -10,6 +10,7 @@ import scipy.io
 import os
 import sys
 import STitch3D
+from STitch3D.utils import align_spots, preprocess, construct_dgl_graph
 import warnings
 warnings.filterwarnings("ignore")
 os.environ["CUDA_VISIBLE_DEVICES"] = "0"
@@ -77,24 +78,26 @@ adata_st4.obs = adata_st4.obs.join(anno_df4, how="left")
 adata_st4 = adata_st4[adata_st4.obs['layer'].notna()]
 # In[4]:
 adata_st_list_raw = [adata_st1, adata_st2, adata_st3, adata_st4]
-adata_st_list = STitch3D.utils.align_spots(adata_st_list_raw, plot=False)
-# In[5]:
+adata_st_list = align_spots(adata_st_list_raw, plot=False)
 celltype_list_use = [
     'Astros_1', 'Astros_2', 'Astros_3', 'Endo', 'Micro/Macro', 'Oligos_1',
     'Oligos_2', 'Oligos_3', 'Ex_1_L5_6', 'Ex_2_L5', 'Ex_3_L4_5', 'Ex_4_L_6',
     'Ex_5_L5', 'Ex_6_L4_6', 'Ex_7_L4_6', 'Ex_8_L5_6', 'Ex_9_L5_6', 'Ex_10_L2_4']
 
-adata_st, adata_basis = STitch3D.utils.preprocess(
+adata_st, adata_basis, dgl_graph, go_return_path_edges = preprocess(
     adata_st_list, adata_ref, celltype_ref=celltype_list_use, sample_col="group",
-    slice_dist_micron=[10., 300., 10.],
-    n_hvg_group=500)
+    slice_dist_micron=[10., 300., 10.], n_hvg_group=500,
+    cache_dir="./data/DLPFC")
 
-# In[ ]
 adata_st.obs["layer"].to_csv("./results_DLPFC/layer.csv")
 
-# In[ ]:
+target_node_type = "spot"
 
-model = STitch3D.model.Model(adata_st, adata_basis)
+# In[ ]:
+model = STitch3D.model.Model(
+    adata_st, adata_basis, graph_encoder_name="GAT",
+    dgl_graph=dgl_graph, path_edges=go_return_path_edges,
+    target_node_type=target_node_type)
 model.train()
 save_path = "./results_DLPFC"
 result = model.eval(adata_st_list_raw, save=True, output_path=save_path)
@@ -122,3 +125,5 @@ for i, adata_st_i in enumerate(result):
     print("Slice %d cell-type deconvolution result:" % slice_idx[i])
     sc.pl.spatial(adata_st_i, img_key="lowres",
                   color=list(adata_basis.obs.index), size=1.)
+
+# %%

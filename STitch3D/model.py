@@ -1,3 +1,4 @@
+import os
 from typing import List
 import torch
 import torch.nn as nn
@@ -7,32 +8,31 @@ import numpy as np
 import anndata as an
 import pandas as pd
 import scipy.sparse
+from sklearn.decomposition import PCA
 from tqdm import tqdm
-import os
+
 from STitch3D.networks import *
 
 
 class Model():
 
-    def __init__(self, adata_st, adata_basis,
-                 hidden_dims=[512, 128],
+    def __init__(self, adata_st: an.AnnData, adata_basis,
+                 hidden_dims=[512, 512],
+                 reduced_input_dim=512,
                  n_heads=1,
                  slice_emb_dim=16,
                  coef_fe=0.1,
-                 training_steps=20000,
-                 lr=2e-3,
+                 training_steps=200,
+                 lr=2e-4,
                  seed=1234,
-                 distribution="Poisson"
+                 distribution: Literal["Poisson", "NB"] ="Poisson",
+                 graph_encoder_name: Literal["EMP", "GAT"] = "GAT",
+                 dgl_graph: dgl.DGLHeteroGraph = None,
+                 path_edges=None,
+                 target_node_type=None,
+                 device='cpu'
                  ):
-
-        self.training_steps = training_steps
-
-        self.adata_st = adata_st
-        self.celltypes = list(adata_basis.obs.index)
-
-        # add device
-        self.device = torch.device(
-            "cuda") if torch.cuda.is_available() else torch.device("cpu")
+        self.device = device
 
         # set random seed
         torch.manual_seed(seed)
@@ -41,18 +41,55 @@ class Model():
             torch.cuda.manual_seed_all(seed)
         torch.backends.cudnn.benchmark = True
 
-        self.hidden_dims = [adata_st.shape[1]] + hidden_dims
+        self.adata_st = adata_st
+        self.celltypes = list(adata_basis.obs.index)
+        self.n_spot_cluster = adata_st.obs["layer"].unique().shape[0]
+        self.hidden_dims = [reduced_input_dim] + hidden_dims
         self.n_celltype = adata_basis.shape[0]
         self.n_slices = len(sorted(set(adata_st.obs["slice"].values)))
+        self.G = dgl_graph
+
+        # read data
+        if scipy.sparse.issparse(adata_st.X):
+            self.X = torch.from_numpy(
+                adata_st.X.toarray()).float().to(
+                self.device)
+        else:
+            self.X = torch.from_numpy(adata_st.X).float().to(self.device)
+        pca = PCA(n_components=reduced_input_dim)
+        self.X = pca.fit_transform(self.X)
+        self.X = torch.from_numpy(self.X).float().to(self.device)
+        self.A = torch.from_numpy(
+            np.array(adata_st.obsm["graph"])).float().to(
+            self.device)
+        self.Y = torch.from_numpy(
+            np.array(adata_st.obsm["count"])).float().to(
+            self.device)
+        self.lY = torch.from_numpy(np.array(
+            adata_st.obs["library_size"]
+            .values.reshape(-1, 1))).float().to(self.device)
+        self.slice = torch.from_numpy(
+            np.array(adata_st.obs["slice"].values)).long().to(
+            self.device)
+        self.basis = torch.from_numpy(
+            np.array(adata_basis.X)).float().to(
+            self.device)
 
         # build model
+        self.graph_encoder_name = graph_encoder_name
         if distribution == "Poisson":
             self.net = DeconvNet(hidden_dims=self.hidden_dims,
                                  n_celltypes=self.n_celltype,
                                  n_slices=self.n_slices,
+                                 n_spot_clusters=self.n_spot_cluster,
+                                 graph_encoder_name=graph_encoder_name,
+                                 G=dgl_graph,
+                                 path_edges=path_edges,
+                                 target_node_type=target_node_type,
+                                 target_node_emb=self.X,
                                  n_heads=n_heads,
                                  slice_emb_dim=slice_emb_dim,
-                                 coef_fe=coef_fe,
+                                 coef_fe=coef_fe
                                  ).to(self.device)
         else:  # Negative Binomial distribution
             self.net = DeconvNet_NB(hidden_dims=self.hidden_dims,
@@ -63,40 +100,25 @@ class Model():
                                     coef_fe=coef_fe,
                                     ).to(self.device)
 
+        # training hyperparameters
+        self.training_steps = training_steps
         self.optimizer = optim.Adamax(list(self.net.parameters()), lr=lr)
+        
 
-        # read data
-        if scipy.sparse.issparse(adata_st.X):
-            self.X = torch.from_numpy(
-                adata_st.X.toarray()).float().to(
-                self.device)
-        else:
-            self.X = torch.from_numpy(adata_st.X).float().to(self.device)
-        self.A = torch.from_numpy(
-            np.array(adata_st.obsm["graph"])).float().to(
-            self.device)
-        self.Y = torch.from_numpy(
-            np.array(adata_st.obsm["count"])).float().to(
-            self.device)
-        self.lY = torch.from_numpy(np.array(
-            adata_st.obs["library_size"]\
-                .values.reshape(-1, 1))).float().to(self.device)
-        self.slice = torch.from_numpy(
-            np.array(adata_st.obs["slice"].values)).long().to(
-            self.device)
-        self.basis = torch.from_numpy(
-            np.array(adata_basis.X)).float().to(
-            self.device)
-
-    def train(self, report_loss=True, step_interval=2000):
+    def train(self, report_loss=True, step_interval=10):
         self.net.train()
         for step in tqdm(range(self.training_steps)):
-            loss = self.net(adj_matrix=self.A,
-                            node_feats=self.X,
-                            count_matrix=self.Y,
-                            library_size=self.lY,
-                            slice_label=self.slice,
-                            basis=self.basis)
+            if self.graph_encoder_name == "EMP":
+                loss = self.net(G=self.G, slice_label=self.slice,
+                                node_feats=self.X, count_matrix=self.Y,
+                                library_size=self.lY, basis=self.basis)
+            else:
+                loss = self.net(adj_matrix=self.A,
+                                node_feats=self.X,
+                                count_matrix=self.Y,
+                                library_size=self.lY,
+                                slice_label=self.slice,
+                                basis=self.basis)
             self.optimizer.zero_grad()
             loss.backward()
             self.optimizer.step()
@@ -114,7 +136,7 @@ class Model():
             save=False, output_path="./results"):
         self.net.eval()
         self.Z, self.beta, self.alpha, self.gamma = self.net.evaluate(
-            self.A, self.X, self.slice)
+            self.A, self.X, self.slice, G=self.G)
 
         if save == True:
             if not os.path.exists(output_path):

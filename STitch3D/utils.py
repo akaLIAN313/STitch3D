@@ -1,3 +1,7 @@
+from sklearn.cluster import KMeans
+import torch.nn.functional as F
+import torch
+import random
 import numpy as np
 import scanpy as sc
 import anndata as ad
@@ -9,16 +13,23 @@ from STitch3D.align_tools import *
 from sklearn.neighbors import NearestNeighbors
 from sklearn.metrics import pairwise_distances
 from matplotlib import cm
+import dgl
+import os
+from typing import Tuple, List
+import pickle
 
 
 def align_spots(adata_st_list_input,  # list of spatial transcriptomics datasets
                 method="icp",  # "icp" or "paste"
-                # a spot has six nearest neighborhoods if "Visium", four nearest neighborhoods otherwise
+                # a spot has six nearest neighborhoods if "Visium",
+                # four nearest neighborhoods otherwise
                 data_type="Visium",
-                # "spatial" for visium; key for the spatial coordinates used for alignment
+                # "spatial" for visium; key for the spatial coordinates
+                # used for alignment
                 coor_key="spatial",
                 tol=0.01,  # parameter for "icp" method; tolerance level
-                # parameter for "icp" method; whether to test multiple rotation angles or not
+                # parameter for "icp" method; whether to test
+                # multiple rotation angles or not
                 test_all_angles=False,
                 plot=False,
                 paste_alpha=0.1,
@@ -66,7 +77,9 @@ def align_spots(adata_st_list_input,  # list of spatial transcriptomics datasets
                 loc_y = np.array(loc_y)
                 loc = np.concatenate((loc_x, loc_y), axis=1)
                 pairwise_loc_distsq = np.sum(
-                    (loc.reshape([1, -1, 2]) - loc.reshape([-1, 1, 2])) ** 2, axis=2)
+                    (loc.reshape([1, -1, 2]) - loc.reshape([-1, 1, 2])) ** 2,
+                    axis=2
+                )
                 n_neighbors = np.sum(pairwise_loc_distsq < 5, axis=1) - 1
                 edge = ((n_neighbors > 1) & (n_neighbors < 5)).astype(np.float32)
             else:
@@ -76,7 +89,9 @@ def align_spots(adata_st_list_input,  # list of spatial transcriptomics datasets
                 loc_y = np.array(loc_y)
                 loc = np.concatenate((loc_x, loc_y), axis=1)
                 pairwise_loc_distsq = np.sum(
-                    (loc.reshape([1, -1, 2]) - loc.reshape([-1, 1, 2])) ** 2, axis=2)
+                    (loc.reshape([1, -1, 2]) - loc.reshape([-1, 1, 2])) ** 2,
+                    axis=2
+                )
                 min_distsq = np.sort(
                     np.unique(pairwise_loc_distsq),
                     axis=None)[1]
@@ -89,11 +104,13 @@ def align_spots(adata_st_list_input,  # list of spatial transcriptomics datasets
         # Align edges
         print("Aligning edges...")
         trans_list = []
-        adata_st_list[0].obsm["spatial_aligned"] = adata_st_list[0].obsm[coor_key].copy()
+        adata_st_list[0].obsm["spatial_aligned"] = \
+            adata_st_list[0].obsm[coor_key].copy()
         # Calculate pairwise transformation matrices
         for i in range(len(adata_st_list) - 1):
             if test_all_angles == True:
-                for angle in [0., np.pi * 1 / 3, np.pi * 2 / 3, np.pi, np.pi * 4 / 3, np.pi * 5 / 3]:
+                for angle in [0., np.pi * 1 / 3, np.pi * 2 / 3,
+                              np.pi, np.pi * 4 / 3, np.pi * 5 / 3]:
                     R = np.array([[np.cos(angle), np.sin(angle), 0],
                                   [-np.sin(angle), np.cos(angle), 0],
                                   [0, 0, 1]]).T
@@ -184,13 +201,15 @@ def preprocess(adata_st_list_input,
                n_hvg_group=500,
                # number of highly variable genes for reference anndata
                three_dim_coor=None,
-               # if not None, use existing 3d coordinates in shape [# of total spots, 3]
+               # if not None,
+               # use existing 3d coordinates in shape [# of total spots, 3]
                coor_key="spatial_aligned",
                # "spatial_aligned" by default
                rad_cutoff=None,
                # cutoff radius of spots for building graph
                rad_coef=1.1,
-               # if rad_cutoff=None, rad_cutoff is the minimum distance between spots multiplies rad_coef
+               # if rad_cutoff=None, rad_cutoff is the minimum distance between
+               #  spots multiplies rad_coef
                slice_dist_micron=None,
                # pairwise distances in micrometer for reconstructing z-axis
                prune_graph_cos=False,
@@ -198,7 +217,30 @@ def preprocess(adata_st_list_input,
                cos_threshold=0.5,  # threshold for pruning graph connections
                c2c_dist=100,
                # center to center distance between nearest spots in micrometer
+               cache_dir=None
                ):
+    """
+    Preprocess the data and optionally cache the results to avoid re-running.
+    """
+    # Define cache file paths
+    if cache_dir is not None:
+        adata_st_cache_path = os.path.join(cache_dir, "adata_st.h5ad")
+        adata_basis_cache_path = os.path.join(cache_dir, "adata_basis.h5ad")
+        dgl_graph_cache_path = os.path.join(cache_dir, "dgl_graph.pkl")
+        go_return_paths_cache_path = os.path.join(
+            cache_dir, "go_return_paths.pkl")
+
+        # Check if cache files exist
+        if os.path.exists(adata_st_cache_path) and os.path.exists(adata_basis_cache_path) and \
+           os.path.exists(dgl_graph_cache_path) and os.path.exists(go_return_paths_cache_path):
+            # Load from cache
+            adata_st = sc.read_h5ad(adata_st_cache_path)
+            adata_basis = sc.read_h5ad(adata_basis_cache_path)
+            with open(dgl_graph_cache_path, "rb") as f:
+                dgl_graph = pickle.load(f)
+            with open(go_return_paths_cache_path, "rb") as f:
+                go_return_paths = pickle.load(f)
+            return adata_st, adata_basis, dgl_graph, go_return_paths
 
     adata_st_list = adata_st_list_input.copy()
 
@@ -339,18 +381,21 @@ def preprocess(adata_st_list_input,
     # Build 3D coordinates
     if three_dim_coor is None:
 
-        # The first adata in adata_list is used as a reference for computing cutoff radius of spots
+        # The first adata in adata_list is used as
+        #  a reference for computing cutoff radius of spots
         adata_st_ref = adata_st_list[0].copy()
         loc_ref = np.array(adata_st_ref.obsm[coor_key])
         pair_dist_ref = pairwise_distances(loc_ref)
         min_dist_ref = np.sort(np.unique(pair_dist_ref), axis=None)[1]
 
         if rad_cutoff is None:
-            # The radius is computed base on the attribute "adata.obsm['spatial']"
+            # The radius is computed base on
+            # the attribute "adata.obsm['spatial']"
             rad_cutoff = min_dist_ref * rad_coef
         print("Radius for graph connection is %.4f." % rad_cutoff)
 
-        # Use the attribute "adata.obsm['spatial_aligned']" to build a global graph
+        # Use the attribute "adata.obsm['spatial_aligned']"
+        # to build a global graph
         if slice_dist_micron is None:
             loc_xy = pd.DataFrame(adata_st.obsm['spatial_aligned']).values
             loc_z = np.zeros(adata_st.shape[0])
@@ -358,7 +403,8 @@ def preprocess(adata_st_list_input,
         else:
             if len(slice_dist_micron) != (len(adata_st_list) - 1):
                 raise ValueError(
-                    "The length of 'slice_dist_micron' should be the number of adatas - 1 !")
+                    "The length of 'slice_dist_micron' "
+                    "should be the number of adatas - 1 !")
             else:
                 loc_xy = pd.DataFrame(adata_st.obsm['spatial_aligned']).values
                 loc_z = np.zeros(adata_st.shape[0])
@@ -390,7 +436,18 @@ def preprocess(adata_st_list_input,
     adata_st.obsm["graph"] = G
     adata_st.obsm["3D_coor"] = loc
 
-    return adata_st, adata_basis
+    dgl_graph, go_return_paths = construct_dgl_graph(G, st_mtx)
+
+    # stores the preprocessed data for cache
+    os.makedirs(cache_dir, exist_ok=True)
+    adata_st.write(adata_st_cache_path)
+    adata_basis.write(adata_basis_cache_path)
+    with open(dgl_graph_cache_path, "wb") as f:
+        pickle.dump(dgl_graph, f)
+    with open(go_return_paths_cache_path, "wb") as f:
+        pickle.dump(go_return_paths, f)
+
+    return adata_st, adata_basis, dgl_graph, go_return_paths
 
 
 def select_hvgs(adata_ref, celltype_ref_col, num_per_group=200):
@@ -403,13 +460,16 @@ def select_hvgs(adata_ref, celltype_ref_col, num_per_group=200):
     return genes
 
 
-def calculate_impubasis(adata_st_input,  # st anndata object (should be one of the output from STitch3D.utils.preprocess)
-                        # reference single-cell anndata object (raw data)
-                        adata_ref_input,
-                        celltype_ref_col="celltype",  # column of adata_ref_input.obs for cell type information
-                        sample_col=None,  # column of adata_ref_input.obs for batch labels
-                        celltype_ref=None,  # specify cell types to use for deconvolution
-                        ):
+def calculate_impubasis(
+    adata_st_input,
+    # st anndata object processed by STitch3D.utils.preprocess()
+    # reference single-cell anndata object (raw data)
+    adata_ref_input,
+    celltype_ref_col="celltype",
+    # column of adata_ref_input.obs for cell type information
+    sample_col=None,  # column of adata_ref_input.obs for batch labels
+    celltype_ref=None,  # specify cell types to use for deconvolution
+):
 
     adata_ref = adata_ref_input.copy()
     adata_ref.var_names_make_unique()
@@ -421,18 +481,19 @@ def calculate_impubasis(adata_st_input,  # st anndata object (should be one of t
         if not isinstance(celltype_ref, list):
             raise ValueError("'celltype_ref' must be a list!")
         else:
-            adata_ref = adata_ref[[(t in celltype_ref)
-                                   for t in
-                                   adata_ref.obs[celltype_ref_col].values.astype(
-                str)],
-                :]
+            adata_ref = adata_ref[
+                [(t in celltype_ref)
+                    for t in adata_ref.obs[celltype_ref_col].values.astype(str)],
+                :
+            ]
     else:
         celltype_counts = adata_ref.obs[celltype_ref_col].value_counts()
         celltype_ref = list(celltype_counts.index[celltype_counts > 1])
-        adata_ref = adata_ref[[(t in celltype_ref)
-                               for t in adata_ref.obs[celltype_ref_col].values.astype(
-                                   str)],
-                              :]
+        adata_ref = adata_ref[
+            [(t in celltype_ref)
+                for t in adata_ref.obs[celltype_ref_col].values.astype(str)],
+            :
+        ]
 
     # Remove cells and genes with 0 counts
     sc.pp.filter_cells(adata_ref, min_genes=1)
@@ -463,8 +524,11 @@ def calculate_impubasis(adata_st_input,  # st anndata object (should be one of t
             tmp_list = []
             for j in range(len(sample_list)):
                 s = sample_list[j]
-                tmp = adata_ref[(adata_ref.obs[celltype_ref_col].values.astype(str) == c) & (
-                    adata_ref.obs[sample_col].values.astype(str) == s), :].obsm["forimpu"]
+                tmp = adata_ref[
+                    (adata_ref.obs[celltype_ref_col].values.astype(str) == c)
+                    & (adata_ref.obs[sample_col].values.astype(str) == s),
+                    :
+                ].obsm["forimpu"]
                 if scipy.sparse.issparse(tmp):
                     tmp = tmp.toarray()
                 if tmp.shape[0] >= 3:
@@ -472,8 +536,10 @@ def calculate_impubasis(adata_st_input,  # st anndata object (should be one of t
             tmp_mean = np.mean(tmp_list, axis=0)
             if scipy.sparse.issparse(tmp_mean):
                 tmp_mean = tmp_mean.toarray()
-            print("%d batches are used for computing the basis vector of cell type <%s>." % (
-                len(tmp_list), c))
+            print(
+                "%d batches are used for computing"
+                "the basis vector of cell type <%s>."
+                % (len(tmp_list), c))
             basis_impu[i, :] = tmp_mean
     else:
         for i in range(len(celltype_list)):
@@ -493,3 +559,282 @@ def calculate_impubasis(adata_st_input,  # st anndata object (should be one of t
     adata_basis_impu.var = df_gene
     adata_basis_impu = adata_basis_impu[~np.isnan(adata_basis_impu.X[:, 0])]
     return adata_basis_impu
+
+
+def construct_dgl_graph(
+    A_spot_spot: scipy.sparse.csr_matrix,
+    A_spot_gene: scipy.sparse.csr_matrix,
+    add_edge_weights: bool = False
+) -> Tuple[dgl.DGLHeteroGraph, List]:
+    """
+    Constructs a DGL heterogeneous graph consisting of spot and gene nodes.
+
+    The graph includes bidirectional edges between spots
+    and directed edges between spots and genes.
+
+    @param A_spot_spot: Adjacency matrix between spots.
+    @param A_spot_gene: Adjacency matrix between spots and genes.
+    @param add_edge_weights: Whether to add edge weights to the graph.
+
+    @return: A DGL heterogeneous graph with spot and gene nodes.
+    """
+
+    spot_u, spot_v = A_spot_spot.nonzero()
+    spot_u, spot_v = \
+        np.concatenate([spot_u, spot_v]), np.concatenate([spot_v, spot_u])
+    spot_weights = A_spot_spot[spot_u, spot_v]
+
+    # Extract the non-zero entries from the adjacency matrix A_spot_gene
+    spot_gene_rows, spot_gene_cols = A_spot_gene.nonzero()
+    spot_gene_weights = A_spot_gene[spot_gene_rows, spot_gene_cols]
+
+    # Create a DGL heterogeneous graph
+    G = dgl.heterograph({
+        ('spot', 'connected_to', 'spot'): (spot_u, spot_v),
+        ('spot', 'containing', 'gene'): (spot_gene_rows, spot_gene_cols),
+        ('gene', 'contained', 'spot'): (spot_gene_cols, spot_gene_rows)
+    })
+
+    go_return_path_edges = [['connected_to', 'connected_to'],
+                            ['containing', 'contained']]
+
+    # Add edge weights to the graph
+    if add_edge_weights:
+        G.edges['connected_to'].data['weight'] = \
+            torch.tensor(spot_weights, dtype=torch.float32)
+        G.edges['containing'].data['weight'] = \
+            torch.tensor(spot_gene_weights, dtype=torch.float32)
+        G.edges['contained'].data['weight'] = \
+            torch.tensor(spot_gene_weights, dtype=torch.float32)
+
+    return G, go_return_path_edges  # !/usr/bin/env python
+
+# coding: utf-8
+
+
+def set_random_seed(seed=0):
+    """Set random/np.random/torch.random/cuda.random seed.
+    Parameters
+    ----------
+    seed : int
+        Random seed to use
+    """
+    random.seed(seed)
+    np.random.seed(seed)
+    torch.manual_seed(seed)
+    if torch.cuda.is_available():
+        torch.cuda.manual_seed(seed)
+
+
+def get_subset_index(Y: torch.Tensor, n=3):
+    Y = Y-Y.min()
+    unique_labels = torch.unique(Y)
+    label_counts = torch.bincount(Y)
+    selected = torch.zeros(Y.shape, dtype=torch.long)
+    for label in unique_labels:
+        selected[Y == label] = torch.arange(label_counts[label])
+    return selected < n
+
+
+def cos_sim(pairs):
+    from torch.nn.functional import cosine_similarity
+    return cosine_similarity(pairs[0], pairs[1]).mean()
+
+
+def dis_sim(pairs):
+    dis = torch.log(-1*(pairs[0] - pairs[1]).pow(2).sum(dim=1).sqrt()).mean()
+    return dis
+# def dis_sim(pairs):
+    # return torch.einsum('i,i->i', pairs[0], pairs[1])
+
+
+def sim_loss(pairs, lambdas, embeddings, sim='cos'):
+    if sim == 'cos':
+        loss_f = cos_sim
+    else:
+        loss_f = dis_sim
+    losses = []
+    for pairs, lbd in zip(pairs, lambdas):
+        assert lbd != 0
+        embedding_pairs = embeddings[pairs]
+        loss = -1*lbd*loss_f(embedding_pairs)
+        losses.append(loss)
+    return losses
+
+
+def info_loss(pair_mats: list[torch.Tensor], lambdas, embeddings: torch.Tensor):
+    # there is problem! should be examined
+    losses = []
+    norms = embeddings.norm(dim=1)
+    norm_mat = torch.einsum('i,j->ij', norms, norms)
+    for pair_mat, lbd in zip(pair_mats, lambdas):
+        assert lbd != 0
+        sim_mat = torch.einsum('ik,jk->ij', embeddings, embeddings) / norm_mat
+        pos_sim = (sim_mat * pair_mat).exp().sum(dim=1)
+        neg_sim = (sim_mat * ~pair_mat).exp().sum(dim=1)
+        loss = -1*lbd*(pos_sim/neg_sim).log().mean()
+        losses.append(loss)
+    return losses
+
+
+def mutual_info(x, x_aug, temperature=0.2, sym=True):
+    batch_size = x.shape[0]
+    x_abs = x.norm(dim=1)
+    x_aug_abs = x_aug.norm(dim=1)
+
+    sim_matrix = torch.einsum(
+        'ik,jk->ij', x, x_aug) / torch.einsum('i,j->ij', x_abs, x_aug_abs)
+
+    sim_matrix = torch.exp(sim_matrix / temperature)
+    pos_sim = sim_matrix[range(batch_size), range(batch_size)]
+
+    if sym:
+
+        loss_0 = pos_sim / (sim_matrix.sum(dim=0) - pos_sim)
+        loss_1 = pos_sim / (sim_matrix.sum(dim=1) - pos_sim)
+    #    print(pos_sim,sim_matrix.sum(dim=0))
+        loss_0 = - torch.log(loss_0).mean()
+        loss_1 = - torch.log(loss_1).mean()
+        loss = (loss_0 + loss_1) / 2.0
+    else:
+        loss = pos_sim / (sim_matrix.sum(dim=1) - pos_sim)
+        loss = - torch.log(loss).mean()
+
+    return loss
+
+
+def q_distribute(Z: torch.Tensor, cluster_centers):
+    """
+    calculate the soft assignment distribution based on the embedding and the cluster centers
+    Args:
+        Z: fusion node embedding
+    Returns:
+        the soft assignment distribution Q
+    """
+    q = 1.0 / (1.0 + torch.sum(torch.pow(Z.unsqueeze(1) - cluster_centers, 2), 2))
+    try:
+        assert q.min() > 1e-5
+    except AssertionError:
+        print(q.min())
+    q = (q.t() / torch.sum(q, 1)).t()
+    return q
+
+
+def target_distribution(Q):
+    """
+    calculate the target distribution (student-t distribution)
+    Args:
+        Q: the soft assignment distribution
+    Returns: target distribution P
+    """
+    weight = Q ** 2 / Q.sum(0)
+    P = (weight.t() / weight.sum(1)).t()
+    return P
+
+
+metric_names = ['ACC', 'NMI', 'PUR', 'ARI', 'F1']
+
+
+def purity_score(y_true, y_pred):
+    from sklearn.metrics.cluster import contingency_matrix
+    # compute contingency matrix (also called confusion matrix)
+    contingency_matrix = contingency_matrix(y_true, y_pred)
+    # return purity
+    return np.sum(
+        np.amax(contingency_matrix, axis=0)) / np.sum(contingency_matrix)
+
+
+def acc_f1_pur(y_true, y_pred):
+    """
+    calculate clustering acc and f1-score
+    Args:
+        y_true: the ground truth
+        y_pred: the clustering id
+
+    Returns: acc and f1-score
+    """
+    from sklearn import metrics
+    from munkres import Munkres
+    y_min = np.min(y_true)
+    y_true = y_true - y_min
+    purity = purity_score(y_true, y_pred)
+    l1 = list(set(y_true))
+    num_class1 = len(l1)
+    l2 = list(set(y_pred))
+    num_class2 = len(l2)
+    ind = 0
+    if num_class1 != num_class2:
+        for i in l1:
+            if i in l2:
+                pass
+            else:
+                y_pred[ind] = i
+                ind += 1
+    l2 = list(set(y_pred))
+    numclass2 = len(l2)
+    if num_class1 != numclass2:
+        print('error')
+        return
+    cost = np.zeros((num_class1, numclass2), dtype=int)
+    for i, c1 in enumerate(l1):
+        mps = [i1 for i1, e1 in enumerate(y_true) if e1 == c1]
+        for j, c2 in enumerate(l2):
+            mps_d = [i1 for i1 in mps if y_pred[i1] == c2]
+            cost[i][j] = len(mps_d)
+    m = Munkres()
+    cost = cost.__neg__().tolist()
+    indexes = m.compute(cost)
+    new_predict = np.zeros(len(y_pred))
+    for i, c in enumerate(l1):
+        c2 = l2[indexes[i][1]]
+        ai = [ind for ind, elm in enumerate(y_pred) if elm == c2]
+        new_predict[ai] = c
+    acc = metrics.accuracy_score(y_true, new_predict)
+    f1_macro = metrics.f1_score(y_true, new_predict, average='macro')
+    return acc, f1_macro, purity
+
+
+def evaluate(y_true, y_pred, show_details=True):
+    """
+    evaluate the clustering performance
+    Args:
+        y_true: the ground truth
+        y_pred: the predicted label
+        show_details: if print the details
+    Returns: None
+    """
+    from sklearn.metrics import adjusted_rand_score as ari_score
+    from sklearn.metrics.cluster import normalized_mutual_info_score as nmi_score
+    acc, f1, pur = acc_f1_pur(y_true, y_pred)
+    nmi = nmi_score(y_true, y_pred, average_method='arithmetic')
+    ari = ari_score(y_true, y_pred)
+    if show_details:
+        print(':acc {:.4f}'.format(acc), ', nmi {:.4f}'.format(nmi),
+              ', ari {:.4f}'.format(ari), ', f1 {:.4f}'.format(f1))
+    return acc, nmi, pur, ari, f1
+
+
+def cluster_and_compuse_kl(Z, n_clusters=7):
+    model = KMeans(n_clusters, n_init=20)
+    cluster_id = model.fit_predict(Z.data.cpu().numpy())
+    q = q_distribute(Z, torch.tensor(model.cluster_centers_).to(Z.device))
+    p = target_distribution(q)
+    kl_loss = F.kl_div(q.log(), p, reduction='batchmean')
+    return kl_loss
+
+
+def cluster_and_evaluate(Z, y, n_clusters):
+    from sklearn.cluster import KMeans
+    """
+    clustering based on embedding
+    Args:
+        Z: the input embedding
+        y: the ground truth
+        n_clusters: number of clusters
+    Returns: acc, nmi, ari, f1, clustering centers
+    """
+    y = np.array(y.to('cpu'))
+    model = KMeans(n_clusters, n_init=20)
+    cluster_id = model.fit_predict(Z.data.cpu().numpy())
+    acc, nmi, pur, ari, f1 = evaluate(y, cluster_id, False)
+    return (acc, nmi, pur, ari, f1), model.cluster_centers_
