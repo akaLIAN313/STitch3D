@@ -833,8 +833,11 @@ def cluster_and_evaluate(Z, y, n_clusters):
         n_clusters: number of clusters
     Returns: acc, nmi, ari, f1, clustering centers
     """
-    y = np.array(y.to('cpu'))
+    if type(y) == torch.Tensor:
+        y = np.array(y.to('cpu'))
     model = KMeans(n_clusters, n_init=20)
-    cluster_id = model.fit_predict(Z.data.cpu().numpy())
+    if type(Z) == torch.Tensor:
+        Z = Z.data.cpu().numpy()
+    cluster_id = model.fit_predict(Z)
     acc, nmi, pur, ari, f1 = evaluate(y, cluster_id, False)
     return (acc, nmi, pur, ari, f1), model.cluster_centers_

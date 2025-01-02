@@ -105,7 +105,7 @@ class Model():
         self.optimizer = optim.Adamax(list(self.net.parameters()), lr=lr)
         
 
-    def train(self, report_loss=True, step_interval=10):
+    def train(self, report_loss=True, step_interval=1):
         self.net.train()
         for step in tqdm(range(self.training_steps)):
             if self.graph_encoder_name == "EMP":

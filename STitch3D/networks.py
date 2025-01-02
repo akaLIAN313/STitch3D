@@ -146,6 +146,7 @@ class DeconvNet(nn.Module):
         # autoencoder
         self.graph_encoder_name = graph_encoder_name
         if graph_encoder_name == 'GAT':
+            print("encoder: GAT")
             self.encoder = nn.Sequential(
                 GATMultiHead(
                     hidden_dims[0], hidden_dims[1],
@@ -163,18 +164,19 @@ class DeconvNet(nn.Module):
                 DenseLayer(hidden_dims[1], hidden_dims[0])
             )
         elif graph_encoder_name == 'EMP':
+            print("encoder: EMP")
             self.encoder = HGIN(
                 G, path_edges,  
                 target_node_emb, target_node_type, 
                 hidden_dims[0], hidden_dims[1], hidden_dims[2],
-                num_layers=1, num_mlp_layers=1,
+                num_layers=1, num_mlp_layers=2,
                 dropout=0.1, device=device
             )
             self.decoder = HGIN(
                 G, path_edges,  
                 target_node_emb, target_node_type, 
                 hidden_dims[2], hidden_dims[1], hidden_dims[0],
-                num_layers=1, num_mlp_layers=1,
+                num_layers=1, num_mlp_layers=2,
                 dropout=0.1, device=device
             )
 

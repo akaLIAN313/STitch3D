@@ -1,2 +1,5 @@
-./STitch3D/__pycache__
-./data
+/.vscode/
+/__pycache__/
+/STitch3D/__pycache__/
+/data/
+/results*/
